@@ -1,83 +1,156 @@
 'use client'
+
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Image from 'next/image'
+
+// Helper functions for clean data formatting
+const formatScore = (val) => Math.round((val || 0) * 100)
+const formatLabel = (key) => key.replace('_score', '').replace(/_/g, ' ')
 
 export default function PreviewPage() {
   const { jobId } = useParams()
   const router = useRouter()
+  
   const [job, setJob] = useState(null)
-  const [selected, setSelected] = useState(null)
+  const [selectedPhoto, setSelectedPhoto] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/status/${jobId}/`)
-      .then(r => r.json())
-      .then(data => {
+    if (!jobId) return
+
+    const abortController = new AbortController()
+
+    const fetchJobDetails = async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/api/status/${jobId}/`, {
+          signal: abortController.signal
+        })
+        
+        if (!res.ok) throw new Error('Failed to load preview details')
+        
+        const data = await res.json()
         setJob(data)
-        if (data.photos?.length > 0) setSelected(data.photos[0])
-      })
+        
+        if (data.photos?.length > 0) {
+          // Sort photos by score descending just to be safe
+          const sortedPhotos = [...data.photos].sort((a, b) => b.score - a.score)
+          setSelectedPhoto(sortedPhotos[0])
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setError('Could not load album. Please try again later.')
+        }
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchJobDetails()
+
+    return () => abortController.abort()
   }, [jobId])
 
-  if (!job) return (
-    <main className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
-      <p style={{ color: 'var(--muted)' }}>Loading preview...</p>
-    </main>
-  )
+  if (isLoading) return <LoadingSkeleton />
 
-  const photos = job.photos || []
-  const best = photos[0]
+  if (error || !job) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-[var(--background)] px-6 text-[var(--foreground)]">
+        <p className="mb-4 text-red-500">{error || 'Album not found.'}</p>
+        <button
+          onClick={() => router.push('/upload')}
+          className="rounded-full bg-[var(--accent)] px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        >
+          Start over
+        </button>
+      </main>
+    )
+  }
+
+  // Ensure photos are sorted by score
+  const photos = [...(job.photos || [])].sort((a, b) => b.score - a.score)
+  const bestPhotoId = photos[0]?.id
 
   return (
-    <main className="min-h-screen px-6 py-12" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-5xl mx-auto">
+    <main className="min-h-screen bg-[var(--background)] px-6 py-12 md:py-20 text-[var(--foreground)]">
+      <div className="mx-auto max-w-5xl">
 
         {/* Header */}
-        <div className="flex items-start justify-between mb-12">
+        <header className="mb-12 flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
           <div>
-            <p className="text-xs tracking-widest uppercase mb-2" style={{ color: 'var(--gold)' }}>Album Preview</p>
-            <h1 className="font-display text-5xl font-light text-cream">Your photos, ranked</h1>
-            <p className="mt-2 text-sm" style={{ color: 'var(--muted)' }}>{photos.length} photos scored by AI • Job #{jobId}</p>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[var(--gold)]">
+              Album Preview
+            </p>
+            <h1 className="font-display text-4xl font-light tracking-tight md:text-5xl">
+              Your photos, ranked
+            </h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {photos.length} photos scored by AI • Job #{jobId}
+            </p>
           </div>
           <button
             onClick={() => router.push('/upload')}
-            className="text-sm px-5 py-2 rounded-full border transition-all hover:border-accent"
-            style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+            className="rounded-full border border-[var(--border)] bg-white px-6 py-2.5 text-sm font-medium text-[var(--muted)] shadow-sm transition-all hover:border-[var(--muted)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
             New album
           </button>
-        </div>
+        </header>
 
-        {/* Best photo */}
-        {best && (
-          <div className="rounded-2xl overflow-hidden mb-10 relative" style={{ background: 'var(--surface)' }}>
-            <div className="absolute top-4 left-4 z-10 px-3 py-1 rounded-full text-xs font-medium" style={{ background: 'var(--gold)', color: '#000' }}>
-              ★ Best photo
-            </div>
+        {/* Dynamic Featured Photo Section */}
+        {selectedPhoto && (
+          <section className="relative mb-16 overflow-hidden rounded-2xl border border-[var(--border)] bg-white shadow-sm transition-all">
+            {selectedPhoto.id === bestPhotoId && (
+              <div className="absolute left-4 top-4 z-10 rounded-full bg-[var(--gold)] px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-white shadow-md">
+                ★ Top Rated
+              </div>
+            )}
+            
             <div className="flex flex-col md:flex-row">
-              <div className="md:w-2/3 h-72 md:h-96 overflow-hidden">
-                <img
-                  src={`${process.env.NEXT_PUBLIC_SERVER_URL}${best.image}`}
-                  alt="Best photo"
-                  className="w-full h-full object-cover"
+              {/* Featured Image */}
+              <div className="relative h-72 w-full bg-gray-50 md:h-[450px] md:w-3/5 lg:w-2/3">
+                <Image
+                  src={`${process.env.NEXT_PUBLIC_SERVER_URL}${selectedPhoto.image}`}
+                  alt="Featured photo preview"
+                  fill
+                  className="object-cover"
+                  unoptimized // Bypasses Next.js optimization for external raw server URLs
                 />
               </div>
-              <div className="md:w-1/3 p-8 flex flex-col justify-center gap-6">
-                <div>
-                  <p className="text-xs tracking-widest uppercase mb-1" style={{ color: 'var(--muted)' }}>Overall Score</p>
-                  <p className="font-display text-6xl font-light text-cream">{Math.round(best.score * 100)}</p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>out of 100</p>
+              
+              {/* Score Breakdown */}
+              <div className="flex w-full flex-col justify-center gap-8 p-8 md:w-2/5 lg:w-1/3">
+                <div className="border-b border-[var(--border)] pb-6">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
+                    Overall Score
+                  </p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-display text-6xl font-light text-[var(--foreground)]">
+                      {formatScore(selectedPhoto.score)}
+                    </span>
+                    <span className="text-sm text-[var(--muted)]">/ 100</span>
+                  </div>
                 </div>
-                {best.score_details && (
-                  <div className="space-y-3">
-                    {Object.entries(best.score_details)
+
+                {selectedPhoto.score_details && (
+                  <div className="space-y-5">
+                    {Object.entries(selectedPhoto.score_details)
                       .filter(([k]) => k.endsWith('_score'))
                       .map(([key, val]) => (
-                        <div key={key}>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span style={{ color: 'var(--muted)' }}>{key.replace('_score', '').replace('_', ' ')}</span>
-                            <span style={{ color: 'var(--accent)' }}>{Math.round(val * 100)}</span>
+                        <div key={key} className="group">
+                          <div className="mb-2 flex justify-between text-xs font-medium">
+                            <span className="capitalize text-[var(--muted)] transition-colors group-hover:text-[var(--foreground)]">
+                              {formatLabel(key)}
+                            </span>
+                            <span className="text-[var(--accent)]">
+                              {formatScore(val)}
+                            </span>
                           </div>
-                          <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-                            <div className="h-full rounded-full" style={{ width: `${val * 100}%`, background: 'var(--accent)' }} />
+                          <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+                            <div 
+                              className="h-full rounded-full bg-[var(--accent)] transition-all duration-1000 ease-out" 
+                              style={{ width: `${formatScore(val)}%` }} 
+                            />
                           </div>
                         </div>
                       ))}
@@ -85,61 +158,105 @@ export default function PreviewPage() {
                 )}
               </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Photo grid */}
-        <p className="text-xs tracking-widest uppercase mb-6" style={{ color: 'var(--muted)' }}>All photos — ranked by score</p>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {photos.map((photo, i) => (
-            <div
-              key={photo.id}
-              onClick={() => setSelected(photo)}
-              className="rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 relative"
-              style={{
-                background: 'var(--surface)',
-                outline: selected?.id === photo.id ? '2px solid var(--accent)' : 'none'
-              }}
-            >
-              <div className="h-40 overflow-hidden">
-                <img
-                  src={`${process.env.NEXT_PUBLIC_SERVER_URL}${photo.image}`}
-                  alt={`Photo ${i + 1}`}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <div className="px-3 py-2 flex items-center justify-between">
-                <span className="text-xs" style={{ color: 'var(--muted)' }}>#{i + 1}</span>
-                <span
-                  className="text-xs font-medium px-2 py-0.5 rounded-full"
-                  style={{
-                    background: photo.score > 0.6 ? 'rgba(58,134,255,0.15)' : 'rgba(255,255,255,0.05)',
-                    color: photo.score > 0.6 ? 'var(--accent)' : 'var(--muted)'
-                  }}
+        {/* Photo Grid */}
+        <section>
+          <div className="mb-6 flex items-center justify-between border-b border-[var(--border)] pb-4">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-[var(--muted)]">
+              All Photos — Ranked by Score
+            </h2>
+            <span className="text-xs text-[var(--muted)]">Select to inspect</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {photos.map((photo, i) => {
+              const isSelected = selectedPhoto?.id === photo.id
+              const isHighCard = photo.score >= 0.8
+              
+              return (
+                <button
+                  key={photo.id}
+                  onClick={() => setSelectedPhoto(photo)}
+                  className={`group relative flex flex-col overflow-hidden rounded-xl bg-white text-left transition-all hover:-translate-y-1 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 ${
+                    isSelected ? 'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--background)]' : 'border border-[var(--border)] shadow-sm'
+                  }`}
+                  aria-label={`View details for photo ranked ${i + 1}`}
                 >
-                  {Math.round(photo.score * 100)}
-                </span>
-              </div>
+                  <div className="relative h-40 w-full bg-gray-50 overflow-hidden">
+                    <Image
+                      src={`${process.env.NEXT_PUBLIC_SERVER_URL}${photo.image}`}
+                      alt={`Thumbnail ${i + 1}`}
+                      fill
+                      className="object-cover transition-transform duration-500 group-hover:scale-110"
+                      unoptimized
+                    />
+                  </div>
+                  <div className="flex items-center justify-between bg-white px-3 py-2.5">
+                    <span className="text-xs font-medium text-[var(--muted)]">
+                      #{i + 1}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                        isHighCard
+                          ? 'bg-blue-50 text-[var(--accent)]'
+                          : 'bg-gray-100 text-[var(--muted)]'
+                      }`}
+                    >
+                      {formatScore(photo.score)}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+      </div>
+    </main>
+  )
+}
+
+// A sleek loading skeleton to prevent UI layout shift while fetching
+function LoadingSkeleton() {
+  return (
+    <main className="min-h-screen bg-[var(--background)] px-6 py-12 md:py-20">
+      <div className="mx-auto max-w-5xl animate-pulse">
+        {/* Header Skeleton */}
+        <div className="mb-12 flex justify-between">
+          <div className="space-y-4">
+            <div className="h-4 w-24 rounded bg-gray-200"></div>
+            <div className="h-10 w-64 rounded bg-gray-200"></div>
+          </div>
+          <div className="h-10 w-28 rounded-full bg-gray-200"></div>
+        </div>
+        
+        {/* Featured Skeleton */}
+        <div className="mb-16 flex h-96 w-full flex-col rounded-2xl bg-gray-100 md:flex-row">
+          <div className="h-full w-full bg-gray-200 md:w-2/3"></div>
+          <div className="w-full p-8 md:w-1/3">
+            <div className="mb-8 h-16 w-32 rounded bg-gray-200"></div>
+            <div className="space-y-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="space-y-2">
+                  <div className="flex justify-between">
+                    <div className="h-3 w-20 rounded bg-gray-200"></div>
+                    <div className="h-3 w-8 rounded bg-gray-200"></div>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-gray-200"></div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
 
-        {/* Selected photo details */}
-        {selected && selected.score_details && (
-          <div className="mt-10 rounded-2xl p-8" style={{ background: 'var(--surface)' }}>
-            <p className="text-xs tracking-widest uppercase mb-6" style={{ color: 'var(--muted)' }}>Score breakdown</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {Object.entries(selected.score_details)
-                .filter(([k]) => k.endsWith('_score'))
-                .map(([key, val]) => (
-                  <div key={key} className="text-center">
-                    <p className="font-display text-3xl font-light text-cream">{Math.round(val * 100)}</p>
-                    <p className="text-xs mt-1 capitalize" style={{ color: 'var(--muted)' }}>{key.replace('_score', '').replace('_', ' ')}</p>
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
+        {/* Grid Skeleton */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-48 w-full rounded-xl bg-gray-200"></div>
+          ))}
+        </div>
       </div>
     </main>
   )
